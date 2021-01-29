@@ -1,7 +1,7 @@
 /* A work-in-progess MEGA65 (Commodore 65 clone origins) emulator
    Part of the Xemu project, please visit: https://github.com/lgblgblgb/xemu
    I/O decoding part (used by memory_mapper.h and DMA mainly)
-   Copyright (C)2016-2020 LGB (Gábor Lénárt) <lgblgblgb@gmail.com>
+   Copyright (C)2016-2021 LGB (Gábor Lénárt) <lgblgblgb@gmail.com>
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -184,6 +184,8 @@ Uint8 io_read ( unsigned int addr )
 					return hwa_kbd_get_last();
 				case 0x11:				// modifier keys on kbd being used
 					return hwa_kbd_get_modifiers();
+				case 0x13:				// $D613: direct access to the kbd matrix, read selected row (set by writing $D614), bit 0 = key pressed
+					return kbd_directscan_query(D6XX_registers[0x14]);	// for further explanations please see this function in input_devices.c
 				default:
 					DEBUG("MEGA65: reading Mega65 specific I/O @ $D6%02X result is $%02X" NL, addr, D6XX_registers[addr]);
 					return D6XX_registers[addr];
