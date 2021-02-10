@@ -1,6 +1,6 @@
 /* A work-in-progess MEGA65 (Commodore 65 clone origins) emulator
    Part of the Xemu project, please visit: https://github.com/lgblgblgb/xemu
-   Copyright (C)2016,2017 LGB (Gábor Lénárt) <lgblgblgb@gmail.com>
+   Copyright (C)2016-2021 LGB (Gábor Lénárt) <lgblgblgb@gmail.com>
    Copyright (C)2020 Hernán Di Pietro <hernan.di.pietro@gmail.com>
 
 This program is free software; you can redistribute it and/or modify
@@ -65,6 +65,7 @@ static int display_row_count = 0;
 static int max_rasters = PHYSICAL_RASTERS_DEFAULT;
 static int visible_area_height = SCREEN_HEIGHT_VISIBLE_DEFAULT;
 static int vicii_first_raster = 7;	// Default for NTSC
+static Uint8 *bitplane_bank_p = main_ram;
 
 void vic4_render_char_raster();
 void vic4_render_bitplane_raster();
@@ -579,7 +580,7 @@ void vic_write_reg ( unsigned int addr, Uint8 data )
 		CASE_VIC_4(0x64):
 		CASE_VIC_4(0x65): CASE_VIC_4(0x66): CASE_VIC_4(0x67): /*CASE_VIC_4(0x68): CASE_VIC_4(0x69): CASE_VIC_4(0x6A):*/ CASE_VIC_4(0x6B): /*CASE_VIC_4(0x6C):
 		CASE_VIC_4(0x6D): CASE_VIC_4(0x6E):*//*CASE_VIC_4(0x70):*/ CASE_VIC_4(0x71): CASE_VIC_4(0x72): CASE_VIC_4(0x73): CASE_VIC_4(0x74):
-		CASE_VIC_4(0x75): CASE_VIC_4(0x76): CASE_VIC_4(0x77): CASE_VIC_4(0x78): CASE_VIC_4(0x79): CASE_VIC_4(0x7A): CASE_VIC_4(0x7B): CASE_VIC_4(0x7C):
+		CASE_VIC_4(0x75): CASE_VIC_4(0x76): CASE_VIC_4(0x77): CASE_VIC_4(0x78): CASE_VIC_4(0x79): CASE_VIC_4(0x7A): CASE_VIC_4(0x7B): /*CASE_VIC_4(0x7C):*/
 		CASE_VIC_4(0x7D): CASE_VIC_4(0x7E): CASE_VIC_4(0x7F):
 			break;
 
@@ -629,6 +630,14 @@ void vic_write_reg ( unsigned int addr, Uint8 data )
 			altpalette	= ((data & 0x30) << 4) + vic_palettes;
 			palregaccofs	= ((data & 0xC0) << 2);
 			check_if_rom_palette(vic_registers[0x30] & 4);
+			break;
+		CASE_VIC_4(0x7C):
+			if ((data & 7) <= 2) {
+				// The lower 3 bits of $7C set's the number of "128K slice" of the main RAM to be used with bitplanes
+				bitplane_bank_p = main_ram + ((data & 7) << 17);
+				DEBUG("VIC4: bitmap bank offset is $%X" NL, (unsigned int)(bitplane_bank_p - main_ram));
+			} else
+				DEBUGPRINT("VIC4: bitplane selection 128K-bank tried to set over 2. Refused to do so." NL);
 			break;
 		/* --- NON-EXISTING REGISTERS --- */
 		CASE_VIC_2(0x31): CASE_VIC_2(0x32): CASE_VIC_2(0x33): CASE_VIC_2(0x34): CASE_VIC_2(0x35): CASE_VIC_2(0x36): CASE_VIC_2(0x37): CASE_VIC_2(0x38):
@@ -1067,14 +1076,14 @@ void vic4_render_bitplane_raster()
 	/* TODO: Cache the following reads & EA calculation */
 
 	const Uint32 offset = display_row * REG_CHRCOUNT * 8 + char_row ;
-	bp_base[0] = main_ram + ((vic_registers[0x33] & (REG_H640 ? 12 : 14)) << 12) + offset;
-	bp_base[1] = main_ram + ((vic_registers[0x34] & (REG_H640 ? 12 : 14)) << 12) + 0x10000 + offset;
-	bp_base[2] = main_ram + ((vic_registers[0x35] & (REG_H640 ? 12 : 14)) << 12) + offset;
-	bp_base[3] = main_ram + ((vic_registers[0x36] & (REG_H640 ? 12 : 14)) << 12) + 0x10000 + offset;
-	bp_base[4] = main_ram + ((vic_registers[0x37] & (REG_H640 ? 12 : 14)) << 12) + offset;
-	bp_base[5] = main_ram + ((vic_registers[0x38] & (REG_H640 ? 12 : 14)) << 12) + 0x10000 + offset;
-	bp_base[6] = main_ram + ((vic_registers[0x39] & (REG_H640 ? 12 : 14)) << 12) + offset;
-	bp_base[7] = main_ram + ((vic_registers[0x3A] & (REG_H640 ? 12 : 14)) << 12) + 0x10000 + offset;
+	bp_base[0] = bitplane_bank_p + ((vic_registers[0x33] & (REG_H640 ? 12 : 14)) << 12) + offset;
+	bp_base[1] = bitplane_bank_p + ((vic_registers[0x34] & (REG_H640 ? 12 : 14)) << 12) + 0x10000 + offset;
+	bp_base[2] = bitplane_bank_p + ((vic_registers[0x35] & (REG_H640 ? 12 : 14)) << 12) + offset;
+	bp_base[3] = bitplane_bank_p + ((vic_registers[0x36] & (REG_H640 ? 12 : 14)) << 12) + 0x10000 + offset;
+	bp_base[4] = bitplane_bank_p + ((vic_registers[0x37] & (REG_H640 ? 12 : 14)) << 12) + offset;
+	bp_base[5] = bitplane_bank_p + ((vic_registers[0x38] & (REG_H640 ? 12 : 14)) << 12) + 0x10000 + offset;
+	bp_base[6] = bitplane_bank_p + ((vic_registers[0x39] & (REG_H640 ? 12 : 14)) << 12) + offset;
+	bp_base[7] = bitplane_bank_p + ((vic_registers[0x3A] & (REG_H640 ? 12 : 14)) << 12) + 0x10000 + offset;
 
 	int line_char_index = 0;				
 	while(line_char_index < REG_CHRCOUNT)
