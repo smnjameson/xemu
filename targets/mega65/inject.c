@@ -76,9 +76,19 @@ static void prg_inject_callback ( void *unused )
 {
 	DEBUGPRINT("INJECT: hit 'READY.' trigger, about to inject %d bytes from $%04X." NL, prg.size, prg.load_addr);
 	memcpy(main_ram + prg.load_addr, prg.stream, prg.size);
-	clear_emu_events();	// clear keyboard & co state, ie for C64 mode, probably had MEGA key pressed still
+	KBD_CLEAR_MATRIX();	// clear keyboard & co state, ie for C64 mode, probably had MEGA key pressed still
 	CBM_SCREEN_PRINTF(under_ready_p - get_screen_width() + 7, "<$%04X-$%04X,%d bytes>", prg.load_addr, prg.load_addr + prg.size - 1, prg.size);
 	if (prg.run_it) {
+		// We must modify BASIC pointers ... Important to know the C64/C65 differences!
+		if (prg.c64_mode) {
+			main_ram[0x2D] =  prg.size + prg.load_addr;
+			main_ram[0x2E] = (prg.size + prg.load_addr) >> 8;
+		} else {
+			main_ram[0xAE] =  prg.size + prg.load_addr;
+			main_ram[0xAF] = (prg.size + prg.load_addr) >> 8;
+			main_ram[0x82] =  prg.size + prg.load_addr;
+			main_ram[0x83] = (prg.size + prg.load_addr) >> 8;
+		}
 		// If program was detected as BASIC (by load-addr) we want to auto-RUN it
 		CBM_SCREEN_PRINTF(under_ready_p, " ?\"@\":RUN:");
 		KBD_PRESS_KEY(0x01);	// press RETURN
@@ -162,7 +172,7 @@ int inject_register_prg ( const char *prg_fn, int prg_mode )
 		prg.size,
 		prg_fn
 	);
-	clear_emu_events();
+	KBD_CLEAR_MATRIX();
 	if (prg.c64_mode)
 		KBD_PRESS_KEY(0x75);	// "MEGA" key is hold down for C64 mode
 	if (inject_register_ready_status("PRG memory injection", prg_inject_callback, NULL)) // prg inject does not use the userdata ...
@@ -204,9 +214,11 @@ void inject_ready_check_do ( void )
 			inject_ready_check_status = 2;
 	} else if (inject_ready_check_status == 100) {	// special mode ...
 		// This is used to check the @ char printed by our tricky RUN line to see it's time to release RETURN (or just simply clear all the keyboard)
-		if (under_ready_p[get_screen_width()] == 0x00) {
+		// 0x12: 'R' from 'READY.', maybe the screen is cleared already no '@' seen! But then at least there should be no 'R' from READY there either,
+		// so we can try to detect that too.
+		if (under_ready_p[get_screen_width()] == 0x00 || under_ready_p[-get_screen_width()] != 0x12) {
 			inject_ready_check_status = 0;
-			clear_emu_events();		// reset keyboard state & co
+			KBD_CLEAR_MATRIX();		// reset keyboard state & co
 			DEBUGPRINT("INJECT: clearing keyboard status on '@' trigger." NL);
 		}
 	} else if (inject_ready_check_status > 10) {
