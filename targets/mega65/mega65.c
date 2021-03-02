@@ -367,7 +367,7 @@ static void mega65_init ( void )
 		fast_mhz = MEGA65_DEFAULT_FAST_CLOCK;
 	}
 	sprintf(fast_mhz_in_string, "%dMHz", fast_mhz);
-	cpu_cycles_per_scanline_for_fast_mode = 64 * fast_mhz;
+	cpu_cycles_per_scanline_for_fast_mode = 32 * fast_mhz;
 	DEBUGPRINT("SPEED: fast clock is set to %dMHz, %d CPU cycles per scanline." NL, fast_mhz, cpu_cycles_per_scanline_for_fast_mode);
 	cpu65_reset(); // reset CPU (though it fetches its reset vector, we don't use that on M65, but the KS hypervisor trap)
 	rom_protect = 0;
