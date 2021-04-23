@@ -1,6 +1,6 @@
-/* Test-case for a very simple, inaccurate, work-in-progress Commodore 65 / MEGA65 emulator,
-   within the Xemu project. F011 FDC core implementation.
-   Copyright (C)2016,2018 LGB (Gábor Lénárt) <lgblgblgb@gmail.com>
+/* F011 FDC (used by Commodore 65 and MEGA65) emulation.
+   Part of the Xemu project, please visit: https://github.com/lgblgblgb/xemu
+   Copyright (C)2016-2021 LGB (Gábor Lénárt) <lgblgblgb@gmail.com>
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -16,25 +16,20 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA */
 
-
-/* !!!!!!!!!!!!!!!!!!!
-   FDC F011 emulation is still a big mess, with bugs, and unplemented features.
-   It gives you only read only access currently, and important features like SWAP
-   bit is not handled at all. The first goal is to be usable with "DIR" and "LOAD"
-   commands on the C65, nothing too much more */
+/* !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+   !! FDC F011 emulation is still a big mess, with bugs, and unplemented features.    !!
+   !! It gives you only read only access currently, and important features like SWAP  !!
+   !! bit is not handled at all. The first goal is to be usable with "DIR" and "LOAD" !!
+   !! commands on the C65, nothing too much more                                      !!
+   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! */
 
 
 #include "xemu/emutools.h"
 #include "xemu/f011_core.h"
 #include "xemu/cpu65.h"
 
-
-
-
-
 // #define DEBUG_FOR_PAUL
 // #define SOME_DEBUG
-
 
 static Uint8 head_track;		// "physical" track, ie, what is the head is positioned at currently
 static int   head_side;
@@ -80,9 +75,8 @@ void fdc_init ( Uint8 *cache_set )
 	cache_p_fdc = 0;
 	drive = 0;
 	fdc_set_disk(0, 0);
-	status_b &= 0x7F;	// at this point we don't want disk changed signal (bit 7) yet
+	status_b &= ~0x01;	// at this point we don't want disk changed signal (bit 0) yet
 }
-
 
 
 void fdc_set_disk ( int in_have_disk, int in_have_write )
@@ -90,7 +84,7 @@ void fdc_set_disk ( int in_have_disk, int in_have_write )
 	have_disk  = in_have_disk;
 	have_write = in_have_write;
 	DEBUG("FDC: init: set have_disk=%d, have_write=%d" NL, have_disk, have_write);
-	status_b |= 0x80;	// disk changed signal is set, since the purpose of this function is to set new disk
+	status_b |= 0x01;	// disk changed signal is set, since the purpose of this function is to set new disk
 	if (have_disk) {
 		status_a |= 1;	// on track-0
 		status_b |= 8;	// disk inserted
@@ -233,8 +227,8 @@ void fdc_write_reg ( int addr, Uint8 data )
 				curcmd = 0x100;		// "virtual" command, by writing the control register
 			drive = data & 7;	// drive selection
 			head_side = (data >> 3) & 1;
-			if ((status_b & 0x80) && drive) {
-				status_b &= 0x7F;	// clearing disk change signal (not correct implementation, as it needs only if the given drive deselected!)
+			if ((status_b & 0x01) && drive) {
+				status_b &= ~0x01;	// clearing disk change signal (not correct implementation, as it needs only if the given drive deselected!)
 				DEBUG("FDC: disk change signal was cleared on drive selection (drive: %d)" NL, drive);
 			}
 			if (drive)
@@ -370,7 +364,7 @@ static void execute_command ( void )
 					status_a |= 1;	// track 0 flag
 				DEBUG("FDC: head position = %d" NL, head_track);
 			}
-			break;	
+			break;
 		case 0x18:	// head step in
 			if (head_track < 128)
 				head_track++;
