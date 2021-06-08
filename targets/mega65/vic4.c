@@ -844,7 +844,7 @@ Uint8 vic_read_reg ( int unsigned addr )
 #undef CASE_VIC_3_4
 
 
-static XEMU_INLINE void vic4_draw_sprite_row_16color( int sprnum, int x_display_pos, const Uint8* row_data_ptr, int xscale )
+static XEMU_INLINE void vic4_draw_sprite_row_16color( const int sprnum, int x_display_pos, const Uint8* row_data_ptr, const int xscale, const int do_tiling )
 {
 	const int totalBytes = SPRITE_EXTWIDTH(sprnum) ? 8 : 3;
 	//const int palindexbase = sprnum * 16 + 128 * (SPRITE_BITPLANE_ENABLE(sprnum) >> sprnum);
@@ -870,7 +870,7 @@ static XEMU_INLINE void vic4_draw_sprite_row_16color( int sprnum, int x_display_
 					*(pixel_raster_start + x_display_pos) = pal16[c1];
 			}
 		}
-	} while ((REG_SPRTILEN & (1 << sprnum)) && x_display_pos < border_x_right);
+	} while (XEMU_UNLIKELY(do_tiling && x_display_pos < border_x_right));
 }
 
 
@@ -928,11 +928,12 @@ static XEMU_INLINE void vic4_do_sprites ( void )
 	// In multicolor mode (MCM=1), the bit combinations "00" and "01" belong to the background
 	// and "10" and "11" to the foreground whereas in standard mode (MCM=0),
 	// cleared pixels belong to the background and set pixels to the foreground.
+	const int reg_tiling = REG_SPRTILEN;
 	for (int sprnum = 7; sprnum >= 0; sprnum--) {
 		if (REG_SPRITE_ENABLE & (1 << sprnum)) {
 			const int spriteHeight = SPRITE_EXTHEIGHT(sprnum) ? REG_SPRHGHT : 21;
-			int x_display_pos = border_x_left + ((SPRITE_POS_X(sprnum) - SPRITE_X_BASE_COORD) * (REG_SPR640 ? 1 : 2));	// in display units
-			int y_logical_pos = SPRITE_POS_Y(sprnum) - SPRITE_Y_BASE_COORD +(BORDER_Y_TOP / (REG_V400 ? 1 : 2));		// in logical units
+			const int x_display_pos = border_x_left + ((SPRITE_POS_X(sprnum) - SPRITE_X_BASE_COORD) * (REG_SPR640 ? 1 : 2));	// in display units
+			const int y_logical_pos = SPRITE_POS_Y(sprnum) - SPRITE_Y_BASE_COORD +(BORDER_Y_TOP / (REG_V400 ? 1 : 2));		// in logical units
 
 			int sprite_row_in_raster = logical_raster - y_logical_pos;
 
@@ -951,11 +952,11 @@ static XEMU_INLINE void vic4_do_sprites ( void )
 				//DEBUGPRINT("VIC: Sprite %d data at $%08X " NL, sprnum, sprite_data_addr);
 				const Uint8 *sprite_data = main_ram + sprite_data_addr;
 				const Uint8 *row_data = sprite_data + widthBytes * sprite_row_in_raster;
-				int xscale = (REG_SPR640 ? 1 : 2) * (SPRITE_HORZ_2X(sprnum) ? 2 : 1);
+				const int xscale = (REG_SPR640 ? 1 : 2) * (SPRITE_HORZ_2X(sprnum) ? 2 : 1);
 				if (SPRITE_MULTICOLOR(sprnum))
 					vic4_draw_sprite_row_multicolor(sprnum, x_display_pos, row_data, xscale);
 				else if (SPRITE_16COLOR(sprnum))
-					vic4_draw_sprite_row_16color(sprnum, x_display_pos, row_data, xscale);
+					vic4_draw_sprite_row_16color(sprnum, x_display_pos, row_data, xscale, reg_tiling & (1 << sprnum));
 				else
 					vic4_draw_sprite_row_mono(sprnum, x_display_pos, row_data, xscale);
 			}
@@ -1173,26 +1174,32 @@ static void vic4_render_char_raster ( void )
 				color_data = (color_data << 8) | (*(colour_ram_current_ptr++));
 				char_value = char_value | (*(screen_ram_current_ptr++) << 8);
 				if (XEMU_UNLIKELY(SXA_GOTO_X(color_data))) {
-					// Start of the GOTOX functionality implementation, tricky one.
-					xcounter = (char_value & 0x3FF);	// first, extract the goto to X value as an usigned number
+					// ---- Start of the GOTOX re-positioning functionality implementation, tricky one ----
+					xcounter = (char_value & 0x3FF);	// first, extract the goto 'X' value as an usigned number
+					// Check the given value as "signed" as well, decide if it's "negative" or not
 					if (REG_H640) {
-						if (0x3FF - xcounter < xcounter_start)
-							xcounter = xcounter_start - (0x3FF - xcounter);
+						// Interpret as a "negative" value compared to xcounter_start if it would fit into the real range of 0-xcounter_start,
+						// otherwise interpret that as a positive offset compared to xcounter_start
+						if (0x400 - xcounter <= xcounter_start)
+							xcounter = xcounter_start - (0x400 - xcounter);
 						else
 							xcounter += xcounter_start;
 					} else {
 						xcounter <<= 1;	// multiply by 2, if !H640 (as the pixel is double width for lower resolution)
-						if (0x7FE - xcounter < xcounter_start)
-							xcounter = xcounter_start - (0x7FE - xcounter);
+						if (0x800 - xcounter <= xcounter_start)
+							xcounter = xcounter_start - (0x800 - xcounter);
 						else
 							xcounter += xcounter_start;
 					}
+					// The ugly: too large goto X values may cause out-of-bound access on eg is_fg buffer. Thus, if the result is larger than
+					// the width of the SDL texture, it won't be seen anyway, so we "clamp" it for the NEXT raster as an ugly solution, which
+					// will be overwritten anyway on rendering in the next raster. This way we don't need checking of out-of-bound access (faster
+					// code) _everywhere_ ...
 					if (xcounter > TEXTURE_WIDTH)
 						xcounter = TEXTURE_WIDTH;
-					//// FIXME: I am not sure if it cannot cause out-of-bound access later in some cases, somewhere, caused by GOTOX stuff before
-					//xcounter = xcounter_start + ((char_value & 0x3FF) << (REG_H640 ? 0 : 1));
-					//DEBUGPRINT("xcounter_start = %d" NL, xcounter_start);
+					// Align current_pixel pointer according the calculated xcounter "horror show" above
 					current_pixel = pixel_raster_start + xcounter;
+					// ---- End of the GOTOX re-positioning functionality implementation ----
 					line_char_index++;
 					char_fetch_offset = char_value >> 13;
 					if (SXA_VERTICAL_FLIP(color_data))
